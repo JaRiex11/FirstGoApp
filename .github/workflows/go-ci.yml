@@ -1,0 +1,70 @@
+name: Go Automated Quality Gate
+
+# Настройка триггеров: запуск при push в main/master и при любых Pull Request
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  qa-gate:
+    name: Code Quality & Testing
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Скачивание исходного кода
+    - name: Check out repository code
+      uses: actions/checkout@v4
+
+    # 2. Установка стабильной версии Go с кэшированием
+    - name: Setup Go environment
+      uses: actions/setup-go@v5
+      with:
+        go-version: 'stable'
+        cache: true
+
+    # 3. ФОРМАТИРОВАНИЕ (gofmt)
+    # Команда вернет ошибку (exit code 1), если найдет неотформатированные файлы.
+    # Флаг -d покажет разницу, -l выведет имена файлов, -e покажет ошибки синтаксиса.
+    - name: Check formatting (gofmt)
+      run: |
+        if [ -n "$(gofmt -l .)" ]; then
+          echo "❌ Следующие файлы не соответствуют стандарту gofmt:"
+          gofmt -d .
+          exit 1
+        else
+          echo "🍏 Все файлы отформатированы корректно."
+        fi
+
+    # 4. СТАТИЧЕСКИЙ АНАЛИЗ (go vet)
+    # Проверяет код на потенциальные скрытые баги, подозрительные конструкции и ошибки типов.
+    - name: Run static analysis (go vet)
+      run: go vet ./...
+
+    # 5. ЗАВИСИМОСТИ (go mod tidy & verify + govulncheck)
+    # Проверяем, что в go.mod и go.sum нет лишних или недостающих зависимостей.
+    - name: Verify module dependencies consistency
+      run: |
+        go mod tidy
+        git diff --exit-code go.mod go.sum || (echo "❌ Ошибка: файлы go.mod или go.sum не актуализированы. Запустите 'go mod tidy' локально и закоммитьте изменения." && exit 1)
+
+    # Проверяем целостность скачанных модулей по хэш-суммам.
+    - name: Verify dependencies integrity
+      run: go mod verify
+
+    # Сканируем зависимости на известные уязвимости инструментами Go безопасности.
+    - name: Check for vulnerabilities (govulncheck)
+      run: |
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        govulncheck ./...
+
+    # 6. СБОРКА (go build)
+    # Убеждаемся, что проект успешно компилируется без ошибок.
+    - name: Build the project
+      run: go build -v ./...
+
+    # 7. ТЕСТИРОВАНИЕ В CI (go test)
+    # Запускаем все написанные вами unit-тесты (включая граничные случаи).
+    - name: Run unit tests
+      run: go test -v ./...
