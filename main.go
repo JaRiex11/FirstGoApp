@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"time"
+    "encoding/json"
+	"log"
+	"net/http"
 )
 
 func daysToNextYear(cur_t time.Time) int {
@@ -15,19 +18,61 @@ func daysToNextYear(cur_t time.Time) int {
 	return daysLeft
 }
 
+// Структуры для машиночитаемого ответа в формате JSON
+type Response struct {
+	DaysLeft int `json:"days_left"`
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// HTTP-обработчик (принимает запрос, проверяет параметры, отдает JSON)
+func handleDaysToNewYear(w http.ResponseWriter, r *http.Request) {
+	// Устанавливаем заголовок ответа, что мы возвращаем именно JSON
+	w.Header().Set("Content-Type", "application/json")
+
+	// Проверяем, что метод именно GET
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "Разрешен только метод GET"})
+		return
+	}
+
+	// Получаем параметр date из URL
+	dateStr := r.URL.Query().Get("date")
+	var targetTime time.Time
+
+	if dateStr == "" {
+		// если запрос без указанной даты, берем текущее время сервера
+		targetTime = time.Now()
+	} else {
+		// Явный формат передачи даты
+		var err error
+		targetTime, err = time.Parse("02-01-2006", dateStr)
+		if err != nil {
+			// некорректные данные обрабатываются, возвращаем статус 400
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: "Неверный формат даты. Используйте ДД-ММ-ГГГГ"})
+			return
+		}
+	}
+
+	// Собственно, считаем дни
+	days := daysToNextYear(targetTime)
+
+	// формируем ответ
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(Response{DaysLeft: days})
+}
+
 func main() {
-	fmt.Print("Введите дату от которой считать дни (в формате ДД-ММ-ГГГГ): ")
-	timeLayout := "02-01-2006"
-	var input string
-	fmt.Scan(&input)
+	// Регистрируем маршрут API
+	http.HandleFunc("/api/days", handleDaysToNewYear)
 
-	cur_t, err := time.Parse(timeLayout, input) // парсинг значения времени по шаблону
-	if err != nil {
-		panic(err)
-	} // обработка возможной ошибки парсинга
-
-	var daysLeft int
-	daysLeft = daysToNextYear(cur_t)
-
-	fmt.Printf("Количество дней до ближайшего Нового Года: %d", daysLeft)
+	fmt.Println("Сервер запущен на порту :8080...")
+	// Запускаем веб-сервер на порту 8080
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatalf("Ошибка запуска сервера: %v", err)
+	}
 }
