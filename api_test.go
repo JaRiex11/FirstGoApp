@@ -101,3 +101,26 @@ func TestAPIDaysToNewYear(t *testing.T) {
 		}
 	})
 }
+
+func TestHealthEndpoint(t *testing.T) {
+	srv := httptest.NewServer(routes())
+	t.Cleanup(srv.Close)
+
+	resp, err := srv.Client().Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("GET /healthz: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var got HealthResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Status != "ok" {
+		t.Fatalf("status = %q, want %q", got.Status, "ok")
+	}
+}
