@@ -8,6 +8,23 @@ import (
 	"time"
 )
 
+type HealthResponse struct {
+	Status string `json:"status"`
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "Разрешен только метод GET"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(HealthResponse{Status: "ok"})
+}
+
 func daysToNextYear(cur_t time.Time) int {
 	// Нормализуем до начала дня, чтобы считать именно календарные дни
 	cur_t = time.Date(cur_t.Year(), cur_t.Month(), cur_t.Day(), 0, 0, 0, 0, cur_t.Location())
@@ -74,6 +91,7 @@ func handleDaysToNewYear(w http.ResponseWriter, r *http.Request) {
 func routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/days", handleDaysToNewYear) // Регистрируем маршрут API
+	mux.HandleFunc("/healthz", handleHealth)         // Дополнительный endpoint
 	return mux
 }
 
