@@ -9,6 +9,9 @@ import (
 )
 
 func daysToNextYear(cur_t time.Time) int {
+	// Нормализуем до начала дня, чтобы считать именно календарные дни
+	cur_t = time.Date(cur_t.Year(), cur_t.Month(), cur_t.Day(), 0, 0, 0, 0, cur_t.Location())
+
 	nextYearNum := cur_t.Year() + 1
 	nextYearDate := time.Date(nextYearNum, time.January, 1, 0, 0, 0, 0, cur_t.Location())
 
@@ -66,13 +69,19 @@ func handleDaysToNewYear(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(Response{DaysLeft: days})
 }
 
+// routes возвращает HTTP-обработчик со всеми маршрутами.
+// Это удобно использовать и в main, и в интеграционных тестах.
+func routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/days", handleDaysToNewYear) // Регистрируем маршрут API
+	return mux
+}
+
 func main() {
-	// Регистрируем маршрут API
-	http.HandleFunc("/api/days", handleDaysToNewYear)
 
 	fmt.Println("Сервер запущен на порту :8080...")
 	// Запускаем веб-сервер на порту 8080
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	if err := http.ListenAndServe(":8080", routes()); err != nil {
 		log.Fatalf("Ошибка запуска сервера: %v", err)
 	}
 }

@@ -62,6 +62,18 @@ func TestDaysToNextYear(t *testing.T) {
 			input:    time.Date(2023, time.March, 1, 0, 0, 0, 0, time.UTC),
 			expected: 306,
 		},
+
+		// Краевые даты с не нулевым временем
+		{
+			name:     "31 декабря 14:30 — должен остаться 1 календарный день",
+			input:    time.Date(2023, time.December, 31, 14, 30, 0, 0, time.UTC),
+			expected: 1,
+		},
+		{
+			name:     "1 января 10:00 — должно быть 365/366 дней",
+			input:    time.Date(2024, time.January, 1, 10, 0, 0, 0, time.UTC),
+			expected: 366,
+		},
 	}
 
 	// Запуск таблицы тестов в цикле
