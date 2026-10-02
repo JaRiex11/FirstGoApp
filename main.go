@@ -2,14 +2,42 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 )
 
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
 type HealthResponse struct {
 	Status string `json:"status"`
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+
+		next.ServeHTTP(rec, r)
+
+		slog.Info("http request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"query", r.URL.RawQuery,
+			"status", rec.status,
+			"duration_ms", time.Since(start).Milliseconds(),
+			"remote", r.RemoteAddr,
+		)
+	})
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -92,14 +120,16 @@ func routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/days", handleDaysToNewYear) // Регистрируем маршрут API
 	mux.HandleFunc("/healthz", handleHealth)         // Дополнительный endpoint
-	return mux
+	return loggingMiddleware(mux)                    // Обернули для логирования
 }
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
-	fmt.Println("Сервер запущен на порту :8080...")
-	// Запускаем веб-сервер на порту 8080
-	if err := http.ListenAndServe(":8080", routes()); err != nil {
-		log.Fatalf("Ошибка запуска сервера: %v", err)
+	addr := ":8080"
+	slog.Info("server starting", "addr", addr)
+
+	if err := http.ListenAndServe(addr, routes()); err != nil {
+		slog.Error("server failed", "err", err)
 	}
 }
