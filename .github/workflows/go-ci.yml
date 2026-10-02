@@ -17,7 +17,7 @@ jobs:
     - name: Check out repository code
       uses: actions/checkout@v4
 
-    # 2. Установка стабильной версии Go с кэшированием
+    # 2. Установка стабильной версии Go с кэшированием модулей
     - name: Setup Go environment
       uses: actions/setup-go@v5
       with:
@@ -25,8 +25,8 @@ jobs:
         cache: true
 
     # 3. ФОРМАТИРОВАНИЕ (gofmt)
-    # Команда вернет ошибку (exit code 1), если найдет неотформатированные файлы.
-    # Флаг -d покажет разницу, -l выведет имена файлов, -e покажет ошибки синтаксиса.
+    # Если gofmt -l вернёт непустой список — значит, есть файлы, отформатированные
+    # не по стандарту. Показываем diff и падаем.
     - name: Check formatting (gofmt)
       run: |
         if [ -n "$(gofmt -l .)" ]; then
@@ -38,34 +38,67 @@ jobs:
         fi
 
     # 4. СТАТИЧЕСКИЙ АНАЛИЗ (go vet)
-    # Проверяет код на потенциальные скрытые баги, подозрительные конструкции и ошибки типов.
+    # Ищет подозрительные конструкции, потенциальные баги и ошибки типов,
+    # которые не отлавливаются компилятором.
     - name: Run static analysis (go vet)
       run: go vet ./...
 
-    # 5. ЗАВИСИМОСТИ (go mod tidy & verify + govulncheck)
-    # Проверяем, что в go.mod нет изменений после tidy (go.sum игнорируется, если его нет)
+    # 5. ЗАВИСИМОСТИ (go mod tidy & verify)
+    # После go mod tidy не должно быть изменений в go.mod/go.sum.
+    # Если diff непустой — значит, разработчик забыл закоммитить изменения.
     - name: Verify module dependencies consistency
       run: |
         go mod tidy
         git diff --exit-code go.mod
         if [ -f go.sum ]; then git diff --exit-code go.sum; fi
 
-    # Проверяем целостность скачанных модулей (если они появятся в будущем)
+    # Проверяем целостность скачанных модулей
     - name: Verify dependencies integrity
       run: go mod verify
 
-    # Сканируем проект на известные уязвимости
-    - name: Check for vulnerabilities (govulncheck)
-      run: |
-        go install golang.org/x/vuln/cmd/govulncheck@latest
-        govulncheck ./...
+    # 6. ПРОВЕРКА УЯЗВИМОСТЕЙ (govulncheck)
+    # Официальный GitHub Action сам ставит свежую версию govulncheck
+    # и корректно работает с кэшем.
+    - name: Run govulncheck
+      uses: golang/govulncheck-action@v1
 
-    # 6. СБОРКА (go build)
+    # 7. СБОРКА (go build)
     # Убеждаемся, что проект успешно компилируется без ошибок.
     - name: Build the project
       run: go build -v ./...
 
-    # 7. ТЕСТИРОВАНИЕ В CI (go test)
-    # Запускаем все написанные вами unit-тесты (включая граничные случаи).
-    - name: Run unit tests
-      run: go test -v ./...
+    # 8. ТЕСТИРОВАНИЕ В CI (go test) с race detector и покрытием
+    # -race включает детектор гонок данных (Data Race Detector).
+    # При использовании -race обязательно нужен -covermode=atomic —
+    # иначе go test завершится с ошибкой несовместимости флагов.
+    - name: Run tests (race + coverage)
+      run: go test -v -race -covermode=atomic -coverprofile=coverage.out ./...
+
+    # Печатаем построчный отчёт покрытия по функциям — удобно для разбора
+    - name: Show coverage summary
+      run: go tool cover -func=coverage.out
+
+    # 9. ПОРОГ ПОКРЫТИЯ
+    # go test не умеет падать по порогу сам — считаем вручную.
+    # awk вытаскивает процент из строки "total: (statements) XX.X%"
+    # и сравнивает с порогом. Если меньше — шаг падает.
+    - name: Enforce coverage threshold
+      run: |
+        total=$(go tool cover -func=coverage.out | awk '/^total:/ {print substr($3, 1, length($3)-1)}')
+        echo "Total coverage: ${total}%"
+        if awk -v t="$total" 'BEGIN { exit !(t+0 >= 70) }'; then
+          echo "🍏 Покрытие не ниже порога 70%."
+        else
+          echo "❌ Покрытие ниже порога 70%."
+          exit 1
+        fi
+
+    # 10. ЗАГРУЗКА АРТЕФАКТА
+    # if: always() — файл coverage.out загрузится, даже если предыдущие шаги упали.
+    # Это удобно для локального разбора покрытия после провального CI.
+    - name: Upload coverage artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage
+        path: coverage.out
